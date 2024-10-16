@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Candlestick Chart</title>
+    <script src="https://cdn.jsdelivr.net/npm/socket.io-client/dist/socket.io.js"></script>
+    <style>
+        /* Global styles */
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f9;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        h2 {
+            color: #333;
+            font-size: 20px;
+            margin-top: 20px;
+        }
+
+        /* Dropdown container styling */
+        .dropdown-container {
+            margin: 20px 0;
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+        }
+
+        /* Style for dropdowns */
+        select {
+            padding: 10px 20px;
+            font-size: 16px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: white;
+            cursor: pointer;
+            outline: none;
+            transition: all 0.3s ease;
+        }
+
+        select:focus {
+            border-color: #007bff;
+        }
+
+        /* Chart container styling */
+        #chartContainer {
+            width: 90%;
+            height: 600px;
+            margin-top: 20px;
+            background-color: white;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Responsive design for smaller devices */
+        @media screen and (max-width: 768px) {
+            #chartContainer {
+                width: 100%;
+                height: 500px;
+            }
+
+            .dropdown-container {
+                flex-direction: column;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Coin selection and time frame dropdowns -->
+    <div class="dropdown-container">
+        <div>
+            <h2>Select a Coin Pair</h2>
+            <select id="coinPairDropdown" onchange="changeCoinPair()">
+                <option value="BNBUSDT">BNB/USDT</option>
+                <option value="ETHUSDT">ETH/USDT</option>
+                <option value="DOTUSDT">DOT/USDT</option>
+            </select>
+        </div>
+
+        <div>
+            <h2>Select Time Frame</h2>
+            <select id="timeFrameDropdown" onchange="changeTimeFrame()">
+                <option value="1m">1 Minute</option>
+                <option value="3m">3 Minutes</option>
+                <option value="5m">5 Minutes</option>
+                <!-- <option value="1h">1 Hour</option>
+                <option value="1d">1 Day</option> -->
+            </select>
+        </div>
+    </div>
+
+    <!-- TradingView Chart container -->
+    <div id="chartContainer"></div>
+
+    <script src="https://s3.tradingview.com/tv.js"></script> <!-- Load TradingView library -->
+
+    <script>
+        const chartContainer = document.getElementById('chartContainer');
+        let tvWidget;
+        let selectedCoin = 'BNBUSDT'; // Default coin
+        let selectedTimeFrame = '1m'; // Default time frame
+        const chartData = {}; // Object to store candle data for each coin and time frame
+
+        // Initialize the TradingView widget
+        function initTradingView(symbol, timeFrame) {
+            tvWidget = new TradingView.widget({
+                "width": chartContainer.clientWidth,
+                "height": 600,
+                "symbol": `BINANCE:${symbol}`,
+                "interval": timeFrame.replace('m', ''), // Convert '1m' to '1', '5m' to '5', etc.
+                "timezone": "Etc/UTC",
+                "theme": "light",
+                "style": "1",
+                "locale": "en",
+                "toolbar_bg": "#f1f3f6",
+                "enable_publishing": false,
+                "allow_symbol_change": true,
+                "container_id": "chartContainer",
+                "studies": [],
+                "hide_top_toolbar": false,
+                "hide_legend": true,
+                "save_image": false,
+                "hide_side_toolbar": false,
+                "details": true,
+                "calendar": true,
+                "responsive": true,
+                "widget_type": "chart",
+                "watchlist": [
+                    "BINANCE:BNBUSDT",
+                    "BINANCE:ETHUSDT",
+                    "BINANCE:DOTUSDT"
+                ]
+            });
+        }
+
+        // Initialize the widget for the first time
+        TradingView.onready(() => {
+            initTradingView(selectedCoin, selectedTimeFrame);
+        });
+
+        // Connect to the socket server
+        const socket = io();
+
+        // Listen for new candle data
+        socket.on('newCandle', (newCandle) => {
+            // Store data in localStorage for the selected coin and time frame
+            const coinFrameKey = `${selectedCoin}_${selectedTimeFrame}`;
+            if (!chartData[coinFrameKey]) {
+                chartData[coinFrameKey] = [];
+            }
+            chartData[coinFrameKey].push({
+                time: Math.floor(newCandle.t / 1000), // Convert to seconds
+                open: newCandle.o,
+                high: newCandle.h,
+                low: newCandle.l,
+                close: newCandle.c
+            });
+
+            // Save updated data in localStorage
+            localStorage.setItem('chartData', JSON.stringify(chartData));
+
+            // Update the chart with the new data
+            updateChart(chartData[coinFrameKey]);
+        });
+
+        // Update the chart with the stored or new data
+        function updateChart(data) {
+            if (tvWidget) {
+                tvWidget.onChartReady(function() {
+                    tvWidget.chart().setSymbol(`BINANCE:${selectedCoin}`);
+                    tvWidget.chart().updateData(data);
+                });
+            }
+        }
+
+        // Change the selected coin pair
+        function changeCoinPair() {
+            selectedCoin = document.getElementById('coinPairDropdown').value;
+            reloadChart();
+        }
+
+        // Change the selected time frame
+        function changeTimeFrame() {
+            selectedTimeFrame = document.getElementById('timeFrameDropdown').value;
+            reloadChart();
+        }
+
+        // Reinitialize the TradingView widget with the selected coin and time frame
+        function reloadChart() {
+            const coinFrameKey = `${selectedCoin}_${selectedTimeFrame}`;
+            const storedData = JSON.parse(localStorage.getItem('chartData')) || {};
+            chartData[coinFrameKey] = storedData[coinFrameKey] || [];
+
+            // Remove the existing widget and create a new one with the selected options
+            if (tvWidget) {
+                tvWidget.remove();
+            }
+            initTradingView(selectedCoin, selectedTimeFrame);
+
+            // Update the chart with stored data or wait for new candles
+            updateChart(chartData[coinFrameKey]);
+        }
+    </script>
+</body>
+</html>
